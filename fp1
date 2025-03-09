@@ -1,0 +1,556 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import numpy as np
+import requests
+from nsepython import *
+from datetime import date
+from newsapi import NewsApiClient
+# Set page configuration
+st.set_page_config(page_title="Stock Market Dashboard", layout="wide")
+
+# Sidebar for navigation
+st.sidebar.title("📊 Market Dashboard")
+page = st.sidebar.radio("Select Page", ["Indian Indices", "Stock Data","Heatmap Data","Top stocks data","Quarterly Data","Options Data","Crypto Data","World Index","NEWS Data"])
+
+### 📌 PAGE 1: Indian Indices
+if page == "Indian Indices":
+    st.title("📈 Indian Stock Market Indices (NSE & BSE)")
+
+    # Dictionary of major indices
+    indices = {
+        "NSE": {
+            "NIFTY 50": "^NSEI",
+            "BANKNIFTY": "^NSEBANK",
+            "FINNIFTY": "^CNXFINNIFTY",
+            "NIFTY MIDCAP 50": "^NSEMDCP50",
+            "NIFTY SMALLCAP 100": "^NSESCAP100",
+            "NIFTY IT": "^CNXIT",
+            "NIFTY AUTO": "^CNXAUTO",
+            "NIFTY PHARMA": "^CNXPHARMA",
+            "NIFTY FMCG": "^CNXFMCG",
+            "NIFTY METAL": "^CNXMETAL",
+            "NIFTY REALTY": "^CNXREALTY",
+            "NIFTY ENERGY": "^CNXENERGY",
+            "NIFTY MEDIA": "^CNXMEDIA",
+            "NIFTY PSU BANK": "^CNXPSU",
+
+        },
+        "BSE": {
+            "SENSEX": "^BSESN",
+            "BSE MIDCAP": "^BSEMD",
+            "BSE SMALLCAP": "^BSESN_SM",
+            "BSE 100": "^BSE100",
+            "BSE 200": "^BSE200",
+            "BSE AUTO": "^BSEAUTO",
+            "BSE HEALTHCARE": "^BSEHEALTH",
+            "BSE METAL": "^BSEMETAL"
+        }
+    }
+
+    # Function to fetch index data
+    def fetch_index_data(ticker):
+        try:
+            index = yf.Ticker(ticker)
+            data = index.history(period="1d")
+            if data.empty:
+                return None
+            latest_price = data["Close"].iloc[-1]
+            open_price = data["Open"].iloc[-1]
+            change = latest_price - open_price
+            percent_change = (change / open_price) * 100
+            return [round(latest_price, 2), round(open_price, 2), round(change, 2), round(percent_change, 2)]
+        except:
+            return None
+
+    # Create DataFrame
+    index_data = []
+    for market, tickers in indices.items():
+        for name, ticker in tickers.items():
+            data = fetch_index_data(ticker)
+            if data:
+                index_data.append([market, name, *data])
+
+    df_indices = pd.DataFrame(index_data, columns=["Market", "Index", "Close", "Open", "Change", "% Change"])
+    
+    if not df_indices.empty:
+        df_indices.set_index(["Market", "Index"], inplace=True)
+        st.subheader("📊 Market Indices Data")
+        st.dataframe(df_indices.style.applymap(lambda x: "color: red;" if isinstance(x, (int, float)) and x < 0 else "color: green;", subset=["Change", "% Change"]))
+
+        # Chart
+        df_chart = df_indices.reset_index()
+        fig = px.bar(df_chart, x="Index", y="Close", color="Market", text="Close", title="Closing Prices of Indian Indices", barmode="group")
+        fig.update_traces(texttemplate='%{text:.2f}', textposition='outside')
+        st.plotly_chart(fig, use_container_width=True)
+
+    else:
+        st.warning("⚠️ No index data available.")
+
+    # Refresh Button
+    if st.button("🔄 Refresh Data"):
+        st.rerun()
+
+### 📌 PAGE 2: Individual Stock Data
+elif page == "Stock Data":
+    st.title("📉 Stock Market Data")
+
+    # User input for stock ticker
+    stock_symbol = st.text_input("Enter Stock Symbol (e.g., TCS.NS, RELIANCE.NS)", "RELIANCE.NS")
+
+    if st.button("Fetch Stock Data"):
+        try:
+            stock = yf.Ticker(stock_symbol)
+            stock_data = stock.history(period="1mo")
+
+            if stock_data.empty:
+                st.error("⚠️ No data found for this stock.")
+            else:
+                stock_data["% Change"] = stock_data["Close"].pct_change() * 100
+                st.subheader(f"📊 {stock_symbol} Stock Data (Last 30 Days)")
+                st.dataframe(stock_data.tail(10))
+                # Stock Price Chart
+                st.subheader(f"📈 {stock_symbol} Price Trend")
+                fig = px.line(stock_data, x=stock_data.index, y="Close", title=f"{stock_symbol} Closing Price Trend", markers=True)
+                st.plotly_chart(fig, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"⚠️ Error fetching stock data: {e}")
+
+elif page == "Heatmap Data":
+    def fetch_stock_data(tickers):
+        data = []
+        for ticker in tickers:
+            stock = yf.Ticker(ticker + ".NS")
+            hist = stock.history(period='1d')
+            if not hist.empty:
+                close_price = hist['Close'].iloc[-1]
+                open_price = hist['Open'].iloc[-1]
+                change = ((close_price - open_price) / open_price) * 100
+                gain_loss = "🟢 Gain" if change > 0 else "🔴 Loss"
+                data.append([ticker, close_price, change, gain_loss])
+        return data
+    
+    tickers = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK', 'HINDUNILVR', 'SBIN', 'BAJFINANCE', 'KOTAKBANK', 'LT',
+           'JIOFIN', 'BANKBARODA', 'ZOMATO', 'MARUTI', 'WIPRO', 'HDFC', 'AXISBANK', 'TATASTEEL', 'TATAMOTORS']
+    
+    st.title("📊 Indian Stock Market Heatmap")
+
+    stock_data = fetch_stock_data(tickers)
+    df = pd.DataFrame(stock_data, columns=['Stock', 'Price', 'Change', 'Gain/Loss'])  
+    
+    fig = px.treemap(df, path=['Stock'], values='Price', color='Change', 
+                 color_continuous_scale='RdYlGn',
+                 title='Indian Stocks Heatmap')
+
+    st.plotly_chart(fig)
+    st.write("### Stock Prices Data")
+    st.dataframe(df.style.applymap(lambda x: 'color: red;' if isinstance(x, float) and x < 0 else 'color: green;', subset=['Change']))
+
+    # Refresh Button
+    if st.button("🔄 Refresh Data"):
+        st.rerun()
+
+
+
+
+
+#top stocks
+elif page == "Top stocks data":
+    # Define sectors and sample company tickers for India
+    SECTOR_COMPANIES = { "Auto": ["MARUTI.NS", "TATAMOTORS.NS", "M&M.NS", "BAJAJ-AUTO.NS", "HEROMOTOCO.NS", "EICHERMOT.NS", "TVSMOTOR.NS", "ASHOKLEY.NS", "SMLISUZU.NS", "FORCEMOT.NS"],
+    "Finance": ["HDFCBANK.NS", "ICICIBANK.NS", "AXISBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "BAJFINANCE.NS", "HDFCLIFE.NS", "RELIANCE.NS", "IDFCFIRSTB.NS", "PNB.NS"],
+    "Health": ["SUNPHARMA.NS", "CIPLA.NS", "DRREDDY.NS", "AUROPHARMA.NS", "BIOCON.NS", "DIVISLAB.NS", "LUPIN.NS", "ABBOTINDIA.NS", "GLAXO.NS", "TORNTPHARM.NS"],
+    "Agriculture": ["COROMANDEL.NS","PIIND.NS","UPL.NS", "FACT.NS","DEEPAKNTR.NS","GODREJAGRO.NS", "DHANUKA.NS", "KSCL.NS", "BAYERCROP.NS", "SHAKTIPUMP.NS", "AVANTIFEED.NS", "Escorts.NS"],
+    "FMCG": ["ITC.NS", "HINDUNILVR.NS", "NESTLEIND.NS", "DABUR.NS", "BRITANNIA.NS", "MARICO.NS", "COLPAL.NS", "GODREJCP.NS", "EMAMILTD.NS", "TATACONSUM.NS"]
+    }
+    st.title("Top 10 Indian Companies in Various Sectors")
+    # Select sector
+    sector = st.selectbox("Select a Sector", list(SECTOR_COMPANIES.keys()))
+    # Fetch company data
+    def get_company_data(tickers):
+        data = []
+        for ticker in tickers:
+            try:
+                stock = yf.Ticker(ticker)
+                info = stock.info
+                data.append({
+                "Ticker": ticker,
+                "Company": info.get("shortName", "N/A"),
+                "Market Cap ($B)": info.get("marketCap", 0) / 1e9,
+                "Stock Price ($)": info.get("regularMarketPrice", "N/A"),
+                "P/E Ratio": info.get("trailingPE", "N/A")
+                })
+            except Exception as e:
+                st.error(f"Error fetching data for {ticker}: {e}")
+        return pd.DataFrame(data)
+    # Display data
+    df = get_company_data(SECTOR_COMPANIES[sector]) 
+    if not df.empty:
+        df = df.sort_values(by="Market Cap ($B)", ascending=False)
+        st.dataframe(df)
+    
+        # Visualization
+        fig = px.bar(df, x="Company", y="Market Cap ($B)", title=f"Top 10 {sector} Companies by Market Cap",
+                labels={"Market Cap ($B)": "Market Cap in Billion $"}, text_auto=True)
+        st.plotly_chart(fig)
+    
+    # Refresh Button
+    if st.button("🔄 Refresh Data"):
+        st.rerun()
+#############################################################################
+
+elif page == "Quarterly Data":
+    def get_quarterly_data(ticker):
+        stock = yf.Ticker(ticker)
+        financials = stock.quarterly_financials.T
+        income_stmt = stock.quarterly_income_stmt.T
+        balance_sheet = stock.quarterly_balance_sheet.T
+        cash_flow = stock.quarterly_cashflow.T
+        return financials, income_stmt, balance_sheet, cash_flow
+    st.title("Indian Stocks Quarterly Data")
+    ticker = st.text_input("Enter Stock Symbol (e.g., TCS.NS, INFY.NS)")
+    if ticker:
+        try:
+            financials, income_stmt, balance_sheet, cash_flow = get_quarterly_data(ticker)
+            st.subheader("Quarterly Financials")
+            st.dataframe(financials)
+            st.subheader("Quarterly Income Statement")
+            st.dataframe(income_stmt)
+            st.subheader("Quarterly Balance Sheet")
+            st.dataframe(balance_sheet)
+            st.subheader("Quarterly Cash Flow Statement")
+            st.dataframe(cash_flow)
+        except Exception as e:
+            st.error(f"Error fetching data: {e}")
+        
+        # Refresh Button
+        if st.button("🔄 Refresh Data"):
+            st.rerun()
+#########################################################################
+#options
+elif page == "Options Data":
+    # Function to fetch option chain data from NSE
+    def get_option_chain(symbol):
+        url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}" if symbol in ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCAPNIFTY"] else f"https://www.nseindia.com/api/option-chain-equities?symbol={symbol}"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.nseindia.com",
+            }
+
+        with requests.Session() as session:
+            try:
+                session.get("https://www.nseindia.com", headers=headers, timeout=5)
+                time.sleep(2)  # Wait for cookies to set
+                response = session.get(url, headers=headers, timeout=5)
+                if response.status_code != 200:
+                    st.error(f"Failed to fetch data. HTTP {response.status_code}")
+                    return None
+
+                data = response.json()
+
+                if "records" in data and "data" in data["records"]:
+                    return data["records"]["data"]
+                else:
+                    st.error("Unexpected API response structure.")
+                    return None
+
+            except requests.exceptions.RequestException as e:
+                st.error(f"Request failed: {e}")
+                return None
+    # Streamlit App
+    st.title("📈 Indian Stock & Index Options Data with Charts")
+
+    # User Inputs
+    symbol = st.text_input("Enter Stock/Index Symbol (e.g., RELIANCE, INFY, NIFTY, BANKNIFTY, FINNIFTY)").upper()
+    strike_price = st.number_input("Enter Strike Price (or 0 for all)", value=0)
+    expiry_date = st.text_input("Enter Expiry Date (YYYY-MM-DD, or leave blank for all)")
+
+    # CE or PE Selection (Radio Button)
+    option_type = st.radio("Select Option Type", ["Call (CE)", "Put (PE)"])
+    # Fetch Data on Button Click
+    if st.button("Fetch Options Data"):
+        if symbol:
+            data = get_option_chain(symbol.upper())
+
+            if data:
+                options_list = []
+
+                for option in data:
+                    if option_type == "Call (CE)" and "CE" in option:
+                        ce = option["CE"]
+                        if (strike_price == 0 or ce["strikePrice"] == strike_price) and (expiry_date == "" or ce["expiryDate"] == expiry_date):
+                            options_list.append({
+                            "Expiry Date": ce["expiryDate"],
+                            "Strike Price": ce["strikePrice"],
+                            "Open Interest": ce.get("openInterest", 0),
+                            "Volume": ce.get("totalTradedVolume", 0),
+                            "Implied Volatility": ce.get("impliedVolatility", 0),
+                            "Last Price": ce.get("lastPrice", 0),
+                            })
+                    
+                    elif option_type == "Put (PE)" and "PE" in option:
+                        pe = option["PE"]
+                        if (strike_price == 0 or pe["strikePrice"] == strike_price) and (expiry_date == "" or pe["expiryDate"] == expiry_date):
+                            options_list.append({
+                            "Expiry Date": pe["expiryDate"],
+                            "Strike Price": pe["strikePrice"],
+                            "Open Interest": pe.get("openInterest", 0),
+                            "Volume": pe.get("totalTradedVolume", 0),
+                            "Implied Volatility": pe.get("impliedVolatility", 0),
+                            "Last Price": pe.get("lastPrice", 0),
+                        })
+                
+                df = pd.DataFrame(options_list)
+                if not df.empty:
+                    st.subheader(f"📊 {symbol} {option_type} Data")
+                    st.dataframe(df)
+
+                    # CSV Download Button
+                    st.download_button(
+                    label="📥 Download Data as CSV",
+                    data=df.to_csv(index=False).encode('utf-8'),
+                    file_name=f"{symbol}_options_data.csv",
+                    mime="text/csv"
+                    )
+
+                    # Plot Open Interest & IV Chart
+                    fig = px.line(df, x="Strike Price", y="Open Interest", markers=True, title="Open Interest Trends")
+                    st.plotly_chart(fig)
+
+                    fig_iv = px.line(df, x="Strike Price", y="Implied Volatility", markers=True, title="Implied Volatility (IV) Trends")
+                    st.plotly_chart(fig_iv)
+                
+                else:
+                    st.warning(f"No {option_type} data found for {symbol}. Try adjusting the filters.")
+            else:
+                st.error("Failed to fetch data. Check symbol and try again.")
+        else:
+            st.warning("Please enter a valid stock or index symbol.")
+    # Refresh Button
+    if st.button("🔄 Refresh Data"):
+        st.rerun()
+##############################################################################
+#crypto
+elif page == "Crypto Data":
+    # Function to calculate RSI
+    def calculate_rsi(data, window=14):
+        delta = data['Close'].diff(1)
+        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    
+    # Function to calculate VWAP
+    def calculate_vwap(data):
+        data['VWAP'] = (data['Close'] * data['Volume']).cumsum() / data['Volume'].cumsum()
+        return data
+    
+    # Function to fetch crypto data
+    def get_crypto_data(symbol, period, interval):
+        crypto = yf.Ticker(symbol)
+        df = crypto.history(period=period, interval=interval)
+        df['RSI'] = calculate_rsi(df)
+        df = calculate_vwap(df)
+        df['SMA'] = df['Close'].rolling(window=20).mean()
+        df['EMA'] = df['Close'].ewm(span=20, adjust=False).mean()
+        return df
+    
+    # Streamlit UI
+    st.title("Cryptocurrency Data with Indicators")
+
+    # User inputs
+    crypto_symbol = st.text_input("Enter Cryptocurrency Symbol (e.g., BTC-USD, ETH-USD)", "BTC-USD")
+    period = st.selectbox("Select Period", ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"], index=5)
+    interval = st.selectbox("Select Interval", ["1m", "2m", "5m", "15m", "30m", "1h", "1d", "1wk", "1mo", "3mo"], index=6)
+    
+    if st.button("Fetch Data"):
+        with st.spinner("Fetching data..."):
+            df = get_crypto_data(crypto_symbol, period, interval)
+        
+            # Plotly chart
+            fig = go.Figure()
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Candlestick'))
+            fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI', yaxis='y2'))
+            fig.add_trace(go.Scatter(x=df.index, y=df['VWAP'], mode='lines', name='VWAP'))
+            fig.add_trace(go.Scatter(x=df.index, y=df['SMA'], mode='lines', name='SMA'))
+            fig.add_trace(go.Scatter(x=df.index, y=df['EMA'], mode='lines', name='EMA'))
+
+            fig.update_layout(
+            title=f"{crypto_symbol} Price Chart with Indicators",
+            xaxis_title="Date",
+            yaxis_title="Price",
+            yaxis2=dict(title='RSI', overlaying='y', side='right'),
+            legend_title="Indicators",
+            )
+            st.plotly_chart(fig)
+        
+            # Display raw data
+            st.subheader("Raw Data")
+            st.write(df.tail())
+    # Refresh Button
+    if st.button("🔄 Refresh Data"):
+        st.rerun()
+
+##############################################################################
+#world index 
+elif page == "World Index":
+    def fetch_index_data(index_symbol, period, interval):
+        index = yf.Ticker(index_symbol)
+        df = index.history(period=period, interval=interval)
+        df['RSI'] = compute_rsi(df['Close'])
+        df['VWAP'] = compute_vwap(df)
+        return df
+
+    def compute_rsi(data, window=14):
+        delta = data.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+        rs = gain / loss
+        return 100 - (100 / (1 + rs))
+    
+    def compute_vwap(df):
+        vwap = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
+        return vwap
+    
+    st.title('🌍 Global Stock Index Dashboard')
+
+    # Sidebar for index selection
+    st.sidebar.header('Select World Index')
+    index_options = {
+    'S&P 500': '^GSPC', 'Dow Jones': '^DJI', 'NASDAQ': '^IXIC',
+    'FTSE 100': '^FTSE', 'Nikkei 225': '^N225', 'DAX': '^GDAXI',
+    'CAC 40': '^FCHI', 'Hang Seng': '^HSI', 'Shanghai Composite': '000001.SS'
+    }
+    selected_index = st.sidebar.selectbox("Choose Index", list(index_options.keys()))
+
+    # User input for date range and interval
+    st.sidebar.header("Select Data Range")
+    period = st.sidebar.selectbox("Period", ['1d', '5d', '1mo', '3mo', '6mo', '1y', '5y', '10y', 'max'], index=5)
+    interval = st.sidebar.selectbox("Interval", ['1m', '5m', '15m', '1h', '1d', '1wk', '1mo'], index=4)
+
+    df_index = fetch_index_data(index_options[selected_index], period, interval)
+    
+    # Display index data
+    st.subheader(f'📊 {selected_index} Index Data')
+    st.dataframe(df_index[['Open', 'High', 'Low', 'Close', 'Volume', 'RSI', 'VWAP']].dropna())
+
+    # Candlestick Chart
+    fig_index = go.Figure()
+    fig_index.add_trace(go.Candlestick(x=df_index.index, open=df_index['Open'], high=df_index['High'],
+        low=df_index['Low'], close=df_index['Close'], name=f'{selected_index} Candlestick'))
+    fig_index.update_layout(title=f'{selected_index} Price Chart', xaxis_title='Date', yaxis_title='Price',
+            template='plotly_dark', xaxis_rangeslider_visible=False)
+    st.plotly_chart(fig_index)
+
+    # RSI Chart
+    fig_index_rsi = go.Figure()
+    fig_index_rsi.add_trace(go.Scatter(x=df_index.index, y=df_index['RSI'], mode='lines', name='RSI', line=dict(color='orange')))
+    fig_index_rsi.update_layout(title=f'{selected_index} RSI Indicator', xaxis_title='Date', yaxis_title='RSI',
+                            template='plotly_dark')
+    st.plotly_chart(fig_index_rsi)
+
+    # VWAP Chart
+    fig_index_vwap = go.Figure()
+    fig_index_vwap.add_trace(go.Scatter(x=df_index.index, y=df_index['VWAP'], mode='lines', name='VWAP', line=dict(color='blue')))
+    fig_index_vwap.update_layout(title=f'{selected_index} VWAP Indicator', xaxis_title='Date', yaxis_title='VWAP',
+        template='plotly_dark')
+    st.plotly_chart(fig_index_vwap)
+
+    st.success("✅ Data updated with enhanced visualization!")
+    # Refresh Button
+    if st.button("🔄 Refresh Data"):
+        st.rerun()
+##############################################################################
+#news item
+
+elif page == "NEWS Data":
+    # Set NewsAPI Key (Replace with your own key)
+    NEWS_API_KEY = "246ba9ee11ab408a9b55c252e58a37da"
+    newsapi = NewsApiClient(api_key=NEWS_API_KEY)
+
+    # Set up Streamlit app
+    st.title("📈 Stock News App")
+
+    #User input for stock ticker
+    stock_ticker = st.text_input("Enter Stock Ticker (e.g., AAPL, GOOG, TSLA)").upper()
+    # Function to fetch stock news
+    def fetch_news(ticker):
+        try:
+            news_data = newsapi.get_everything(q=ticker, language="en", sort_by="publishedAt")
+            return news_data.get("articles", [])  # Ensure it returns a list
+        except Exception as e:
+            st.error(f"Error fetching news: {e}")
+            return []
+    
+    # Function to display stock info
+    def display_stock_info(ticker):
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            st.subheader(f"📊 {info.get('longName', ticker)} Stock Info")
+            st.write(f"📌 **Industry:** {info.get('industry', 'N/A')}")
+            st.write(f"🏛 **Exchange:** {info.get('exchange', 'N/A')}")
+            st.write(f"💰 **Current Price:** ${info.get('currentPrice', 'N/A')}")
+            st.write(f"📉 **52 Week Low:** ${info.get('fiftyTwoWeekLow', 'N/A')}")
+            st.write(f"📈 **52 Week High:** ${info.get('fiftyTwoWeekHigh', 'N/A')}")
+            # Additional Stock Metrics
+            st.write(f"📊 **Market Cap:** ${info.get('marketCap', 'N/A'):,}")
+            st.write(f"📈 **P/E Ratio:** {info.get('trailingPE', 'N/A')}")
+            st.write(f"💸 **Dividend Yield:** {info.get('dividendYield', 'N/A')*100:.2f}%")
+            st.write(f"📉 **Beta (Volatility):** {info.get('beta', 'N/A')}")
+            st.write(f"📊 **Volume:** {info.get('volume', 'N/A'):,} vs Avg: {info.get('averageVolume', 'N/A'):,}")
+            st.write(f"💰 **EPS (Earnings Per Share):** ${info.get('trailingEps', 'N/A')}")
+            st.write(f"🔄 **Previous Close:** ${info.get('previousClose', 'N/A')}")
+            st.write(f"🚀 **Open Price:** ${info.get('open', 'N/A')}")
+            return info
+        except Exception as e:
+            st.error(f"Error fetching stock info: {e}")
+            return None
+    
+    # Initialize session state for news index
+    if "news_index" not in st.session_state:
+        st.session_state.news_index = 0
+    if "news_articles" not in st.session_state:
+        st.session_state.news_articles = []
+    
+    # Fetch stock data & news when a ticker is entered
+    if stock_ticker:
+        stock_info = display_stock_info(stock_ticker)
+
+        if st.sidebar.button("🔄 Fetch News"):
+            st.session_state.news_articles = fetch_news(stock_ticker)
+            st.session_state.news_index = 0  # Reset index
+   
+        # Display news one by one with navigation
+        if st.session_state.news_articles:
+            news = st.session_state.news_articles[st.session_state.news_index]
+        
+            st.subheader(f"📰 {news.get('title', 'No Title Available')}")
+            st.write(f"📝 {news.get('description', 'No Description Available')}")
+            st.write(f"🔗 [Read More]({news.get('url', '#')})")
+
+            # Navigation buttons for news
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.session_state.news_index > 0:
+                    if st.button("⬅️ Previous News"):
+                        st.session_state.news_index -= 1
+                    st.rerun()
+            with col2:
+                if st.session_state.news_index < len(st.session_state.news_articles) - 1:
+                    if st.button("Next News ➡️"):
+                        st.session_state.news_index += 1
+                        st.rerun()
+        else:
+            st.warning("No news available. Click '🔄 Fetch News' to get latest updates.")
+    # Refresh Button
+    if st.button("🔄 Refresh Data"):
+        st.rerun()
+
+     
+
+      
